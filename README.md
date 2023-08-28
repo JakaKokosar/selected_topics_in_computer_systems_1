@@ -119,7 +119,10 @@ We tried several different configurations:
 
 - 32 tasks, 32 CPU cores (4 task per node)
 
-    **STILL RUNNING**
+    **Job submition time:** 07:00:44  <br>
+    **Job end time:** 23:35:00  <br>
+    **Duration of a job:** 16:34:16  <br>
+    **Avg. runtime of python script:** 18.348 seconds
 
 
 We significantly reduced the amount of time required to conduct numerous experiments. Instead of days, we now measure the time in hours. However, these durations appear to vary considerably, depending on how the SLURM scheduler handles our tasks.
