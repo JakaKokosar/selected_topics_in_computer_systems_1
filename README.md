@@ -36,8 +36,8 @@ Just to run one experiment of this size and 1000 permutation tests, it would tak
 
 # Benchmark Setup
 
-## sccat vs time library
-We decided to use `sccat` to extract the runtimes of the python script. What we found is that those times differ significantly from time measured in python script. We suspect this is because `sccat` times probably also consider the time it takes for the resources to be allocated. For example, when we ran a `sbatch` with 1024 tasks and 1 CPU core and printed compute times for all tasks (using the time library in python), we got ranging values from 4 to 5s (per task). If we do `sccat` of that job, the raw elapsed time is around 14s. This was just one example, but we consistently noticed the difference in our experiments.
+## sacct vs time library
+We decided to use `sacct` to extract the runtimes of the python script. What we found is that those times differ significantly from time measured in python script. We suspect this is because `sacct` times probably also consider the time it takes for the resources to be allocated. For example, when we ran a `sbatch` with 1024 tasks and 1 CPU core and printed compute times for all tasks (using the time library in python), we got ranging values from 4 to 5s (per task). If we do `sacct` of that job, the raw elapsed time is around 14s. This was just one example, but we consistently noticed the difference in our experiments.
 
 ## slower nodes
 We also noticed that the same jobs would have slower runtimes on smaller nodes. In our experiments, we decided to always use the following flag:
@@ -76,11 +76,11 @@ We also wanted to compare this results if we only used different number of tasks
 
 We can observe that there is additional overhead when using tasks versus only CPU cores. But after around 128 tasks this starts paying off.
 
-We noticed that at some point, the overhead of scheduling tasks overshadows the speedups gained from reducing input sizes. This becomes evident when we measure the time within the Python script and compare it to what sccat reports, a discrepancy that is clearly visible. To illustrate this, take a look at the zoomed-in version of the graph above:
+We noticed that at some point, the overhead of scheduling tasks overshadows the speedups gained from reducing input sizes. This becomes evident when we measure the time within the Python script and compare it to what sacct reports, a discrepancy that is clearly visible. To illustrate this, take a look at the zoomed-in version of the graph above:
 
-![](images/sccat_time.png)
+![](images/sacct_time.png)
 
-If we measure the time within the Python script and compare it to what sccat reports, this discrepancy is indeed clearly visible.
+If we measure the time within the Python script and compare it to what sacct reports, this discrepancy is indeed clearly visible.
 
 
 ## 1000 permutations
