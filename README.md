@@ -19,11 +19,116 @@ These numbers differ across the various TCGA datasets, reflecting each dataset's
 
 # Methods
 
-We implemented a python script which has two inputs; **data** and all **pair-wise combinations of genes**. We then split input genes in two distinct ways; given a number of tasks or CPUs. 
+### Experimental setup:
+
+- We used **ARNES** compute cluster to run our experiments. 
+ 
+- We limited ourselves to compute nodes with ids ranging from wn101 to wn162. These are nodes with 128 compute cores with AMD procesors.
+
+- Try different SLURM job configurations; multiple tasks accorss different nodes, multiple tasks on the same node, multiple CPU cores per task, etc.
+
+### Python script:
+
+We implemented a python script which has two inputs; **data** and all **pair-wise combinations of genes**. Example of running the [script](compute.py):
+
+``` bash
+compute.py --tcga_project "project-name" --input_data "path_to_data" --input_genes "path_to_gene_combinations"
+```
+
+Our [script](compute.py) is designed to work seamlessly with SLURM workload manager, allowing it to partition the input data across the specified number of SLURM tasks and fully utilize all available CPU cores within each task.
+
+The [script](compute.py) achieves this adaptability by reading SLURM environment variables like `SLURM_PROCID`, `SLURM_CPUS_PER_TASK`, and `SLURM_NTASKS`, which inform it about the task ID, the number of CPUs available per task, and the total number of tasks, respectively.
+
+Part of the [script](compute.py) that is responsible for spliting the input genes based on the number of tasks:
+
+``` python
+num_of_tasks = int(os.environ.get('SLURM_NTASKS'))
+slurm_proc_id = int(os.environ.get('SLURM_PROCID'))
+
+genes = pd.read_csv(args.input_genes, header=None)
+
+if num_of_tasks == 1:
+    genes = genes.values
+else:
+    # split input array in equal chunks based on `num_of_tasks`
+    # and select the corresponding chunk based on `slurm_proc_id`
+    # which is is ranging from 0 to `num_of_tasks` - 1
+    genes = np.array_split(genes, num_of_tasks)[slurm_proc_id].values
+```
+
+After obtaining the necessary chunk of input genes, we employ the [Joblib](https://joblib.readthedocs.io/en/stable/parallel.html) to further distribute the genes across the available CPU cores for a given task. Joblib is a Python library that provides an easy-to-use API for parallelizing computation across multiple cores. Joblib can support both multi-threading and multi-processing. The choice between spawning a thread or a process is determined by the backend that joblib is utilizing.
+
+Part of the [script](compute.py) that is responsible for further distributing the computation across the available CPU cores in a given task:
+
+``` python
+cpus_per_task = int(os.environ.get('SLURM_CPUS_PER_TASK'))
+
+df = pd.read_csv(input_data)
+
+if cpus_per_task == 1:
+    parallel_kwargs = {'return_as': 'generator'}
+else:
+    parallel_kwargs = {'n_jobs': cpus_per_task, 
+                       'return_as': 'generator', 
+                       'batch_size': len(genes)//cpus_per_task, 
+                       'pre_dispatch': 'all'}
+
+# If we use n_jobs = -1, joblib will use all available CPU cores.
+# However, python process will see all available CPU cores on the node.
+# This number may be different from what we specified in our SLURM job config.
+# To avoid this, we use `cpus_per_task` to specify the number of CPU cores.
+
+# run the parallel computation
+parallel = Parallel(**parallel_kwargs)
+results = parallel(
+    delayed(worker)(g1, df[g1], g2, df[g2], df['time'], df['event'])
+    for g1, g2 in genes
+)
+```
+
+
+The image below illustrates the overall workflow of the [script](compute.py) and how it interacts with the SLURM scheduler.
 
 ![](images/image0.png)
 
-We utilize the following SLURM environment variables: `SLURM_PROCID`, `SLURM_NTASKS`, and `SLURM_CPUS_PER_TASK`. The input gene array is divided based on the number of tasks. Subsequently, we index the corresponding segment using `SLURM_PROCID`. After obtaining the necessary gene segment, we employ the Joblib Python library to further distribute the genes across the available compute cores.
+In summary we split input genes in two distinct ways; given a number of tasks and CPU cores in a give task. This allows us to easily scale the computation based on the available resources. With this approach we were able to experiment with different SLURM job configurations and compare the results. 
+
+
+### SBATCH configuration:
+
+Finaly here is the template of SBATCH bash script we used to run our experiments. In this script we (1) provide the required resources and other parameters for the execution of the job, (2) we load Anaconda environment through modules, (3) we specify the path to the Python interpreter of the conda environment, and (4) we use 'srun' to run the python script.
+
+```bash
+#!/bin/bash
+#SBATCH --time=00:01:00
+#SBATCH --job-name=gene_interactions
+#SBATCH --output=stdout/%x-%A_%a.out
+#SBATCH --error=stderr/%x-%A_%a.err
+#SBATCH --ntasks=<number_of_tasks>
+#SBATCH --cpus-per-task=<number_of_cpus>
+#SBATCH --nodes=<desired_number_of_nodes>
+#SBATCH --array=<range_of_permutations>
+#SBATCH --exclude=wn[051,052,053,061,062,064,065]
+
+# Load module
+module load Anaconda3/2022.05
+
+# Specify the path to the Python interpreter of the conda environment
+PYTHON_ENV_PATH="/d/hpc/home/jkokosar/miniconda3/envs/dev/bin/python"
+
+tcga_project=$1
+
+data_input_file="data/${tcga_project}/${tcga_project}-data.csv"
+gene_input_file="data/${tcga_project}/all-combinations.csv"
+
+
+# Run the script with the Python interpreter of the environment
+srun $PYTHON_ENV_PATH compute.py --tcga_project "$tcga_project" --input_data "$data_input_file"  --input_genes "$gene_input_file"
+```
+
+
+
+# Benchmark Setup
 
 Ultimately, we would like to use this environment to speed up our experiments. Here, we are focusing on a specific dataset and a reduced number of genes. On our local machine, M1 Macs, there are 8 high-performance cores. If we use all the compute power on this specific dataset, we roughly need around 3 minutes. However, we have to consider the following:
 
@@ -32,9 +137,6 @@ Ultimately, we would like to use this environment to speed up our experiments. H
 - We want to perform permutation tests, which add additional computational needs.
 
 Just to run one experiment of this size and 1000 permutation tests, it would take us more than 48 hours. Access to such computer systems can significantly contribute to the accelerated execution of these kinds of experiments. Below, we present several different scenarios and benchmarks that have helped us in understanding and managing these kinds of systems.
-
-
-# Benchmark Setup
 
 ## sacct vs time library
 We decided to use `sacct` to extract the runtimes of the python script. What we found is that those times differ significantly from time measured in python script. We suspect this is because `sacct` times probably also consider the time it takes for the resources to be allocated. For example, when we ran a `sbatch` with 1024 tasks and 1 CPU core and printed compute times for all tasks (using the time library in python), we got ranging values from 4 to 5s (per task). If we do `sacct` of that job, the raw elapsed time is around 14s. This was just one example, but we consistently noticed the difference in our experiments.
